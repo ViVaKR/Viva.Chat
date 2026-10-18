@@ -1,0 +1,34 @@
+name: deploy
+on:
+  push:
+    tags: 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: 1. 소스코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: 2. .NET 환경 세팅
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: 3. 패키지 빌드 및 압축 (Pack)
+        run: dotnet pack Viva.Chat.slnx -c Release -o out -p:Version=${GITHUB_REF_NAME#v}
+
+      - name: 4. NuGet 임시 API 키 발급 (OIDC)
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: KimBurmJun
+
+      - name: 5. Nuget Push (Contracts 먼저)
+        run: |
+          dotnet nuget push "out/Viva.Chat.Contracts.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key ${{ steps.login.outputs.NUGET_API_KEY }} --skip-duplicate
+          dotnet nuget push "out/Viva.Chat.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key ${{ steps.login.outputs.NUGET_API_KEY }} --skip-duplicate
