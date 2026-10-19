@@ -20,7 +20,9 @@ jobs:
           dotnet-version: '10.0.x'
 
       - name: 3. 패키지 빌드 및 압축 (Pack)
-        run: dotnet pack Viva.Chat.slnx -c Release -o out -p:Version=${GITHUB_REF_NAME#v}
+        run: |
+          dotnet pack Viva.Chat.slnx -c Release -o out -p:Version=${GITHUB_REF_NAME#v}
+          ls -l out
 
       - name: 4. NuGet 임시 API 키 발급 (OIDC)
         id: login
@@ -28,7 +30,7 @@ jobs:
         with:
           user: KimBurmJun
 
-      - name: 5. Nuget Push (Contracts 먼저)
+      - name: 5. NuGet Push (Contracts 먼저)
         run: |
           dotnet nuget push "out/Viva.Chat.Contracts.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key ${{ steps.login.outputs.NUGET_API_KEY }} --skip-duplicate
           dotnet nuget push "out/Viva.Chat.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key ${{ steps.login.outputs.NUGET_API_KEY }} --skip-duplicate
