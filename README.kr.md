@@ -1,10 +1,10 @@
-# Viva.Chat
+# ViVaKR.Chat
 
 ASP.NET Core에 바로 꽂아 쓰는 **SignalR 채팅 허브**입니다. 여러 사이트가 함께 쓰도록 만들었습니다.
 
 허브 하나, 계약(Contracts) 하나, 아주 작은 저장소 인터페이스 하나. 두 줄이면 어떤 API에든 연결되고, 사이트마다 방이 섞이지 않습니다.
 
-[![NuGet](https://img.shields.io/nuget/v/Viva.Chat.svg)](https://www.nuget.org/packages/Viva.Chat)
+[![NuGet](https://img.shields.io/nuget/v/ViVaKR.Chat.svg)](https://www.nuget.org/packages/ViVaKR.Chat)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 [English](README.md)
@@ -23,25 +23,25 @@ ASP.NET Core에 바로 꽂아 쓰는 **SignalR 채팅 허브**입니다. 여러 
 ## 설치
 
 ```bash
-dotnet add package Viva.Chat
+dotnet add package ViVaKR.Chat
 ```
 
-`Viva.Chat.Contracts` 는 의존성으로 함께 설치됩니다. 클라이언트나 저장소 프로젝트처럼 메시지 타입만 필요하다면 따로 참조할 수 있습니다.
+`ViVaKR.Chat.Contracts` 는 의존성으로 함께 설치됩니다. 클라이언트나 저장소 프로젝트처럼 메시지 타입만 필요하다면 따로 참조할 수 있습니다.
 
 ```bash
-dotnet add package Viva.Chat.Contracts
+dotnet add package ViVaKR.Chat.Contracts
 ```
 
 ## 구성 요소
 
 | 패키지 | 구분 | 이름 | 설명 |
 |--------|------|------|------|
-| `Viva.Chat.Contracts` | Record | `ChatMessage` | 채팅 메시지 하나 |
-| `Viva.Chat.Contracts` | Interface | `IChatClient` | 서버가 클라이언트에서 호출하는 메서드 |
-| `Viva.Chat.Contracts` | Interface | `IChatStore` | 저장소 추상화 |
-| `Viva.Chat` | Class | `ChatHub` | SignalR 허브 |
-| `Viva.Chat` | Class | `VivaChatOptions` | 설정 옵션 |
-| `Viva.Chat` | Extensions | `AddVivaChat` / `MapVivaChat` | DI 등록과 엔드포인트 매핑 |
+| `ViVaKR.Chat.Contracts` | Record | `ChatMessage` | 채팅 메시지 하나 |
+| `ViVaKR.Chat.Contracts` | Interface | `IChatClient` | 서버가 클라이언트에서 호출하는 메서드 |
+| `ViVaKR.Chat.Contracts` | Interface | `IChatStore` | 저장소 추상화 |
+| `ViVaKR.Chat` | Class | `ChatHub` | SignalR 허브 |
+| `ViVaKR.Chat` | Class | `VivaChatOptions` | 설정 옵션 |
+| `ViVaKR.Chat` | Extensions | `AddVivaChat` / `MapVivaChat` | DI 등록과 엔드포인트 매핑 |
 
 ### 허브 메서드 (클라이언트 → 서버)
 

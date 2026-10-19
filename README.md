@@ -1,10 +1,10 @@
-# Viva.Chat
+# ViVaKR.Chat
 
 A drop-in **SignalR chat hub** for ASP.NET Core, built to be shared across many sites.
 
 One hub, one set of contracts, and a tiny storage interface. Wire it into any API with two lines, and keep every site's rooms neatly separated.
 
-[![NuGet](https://img.shields.io/nuget/v/Viva.Chat.svg)](https://www.nuget.org/packages/Viva.Chat)
+[![NuGet](https://img.shields.io/nuget/v/ViVaKR.Chat.svg)](https://www.nuget.org/packages/ViVaKR.Chat)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 [한국어](README.kr.md)
@@ -23,25 +23,25 @@ One hub, one set of contracts, and a tiny storage interface. Wire it into any AP
 ## Installation
 
 ```bash
-dotnet add package Viva.Chat
+dotnet add package ViVaKR.Chat
 ```
 
-`Viva.Chat.Contracts` comes along as a dependency. If you only need the message types (for example in a client or a storage project), reference it on its own:
+`ViVaKR.Chat.Contracts` comes along as a dependency. If you only need the message types (for example in a client or a storage project), reference it on its own:
 
 ```bash
-dotnet add package Viva.Chat.Contracts
+dotnet add package ViVaKR.Chat.Contracts
 ```
 
 ## What's inside
 
 | Package | Kind | Name | Description |
 |---------|------|------|-------------|
-| `Viva.Chat.Contracts` | Record | `ChatMessage` | A single chat message |
-| `Viva.Chat.Contracts` | Interface | `IChatClient` | Methods the server calls on clients |
-| `Viva.Chat.Contracts` | Interface | `IChatStore` | Persistence abstraction |
-| `Viva.Chat` | Class | `ChatHub` | The SignalR hub |
-| `Viva.Chat` | Class | `VivaChatOptions` | Configuration |
-| `Viva.Chat` | Extensions | `AddVivaChat` / `MapVivaChat` | DI registration and endpoint mapping |
+| `ViVaKR.Chat.Contracts` | Record | `ChatMessage` | A single chat message |
+| `ViVaKR.Chat.Contracts` | Interface | `IChatClient` | Methods the server calls on clients |
+| `ViVaKR.Chat.Contracts` | Interface | `IChatStore` | Persistence abstraction |
+| `ViVaKR.Chat` | Class | `ChatHub` | The SignalR hub |
+| `ViVaKR.Chat` | Class | `VivaChatOptions` | Configuration |
+| `ViVaKR.Chat` | Extensions | `AddVivaChat` / `MapVivaChat` | DI registration and endpoint mapping |
 
 ### Hub methods (client → server)
 

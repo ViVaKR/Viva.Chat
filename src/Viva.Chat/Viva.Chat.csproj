@@ -5,7 +5,20 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
-
+  <PropertyGroup>
+    <PackageId>ViVaKR.Chat</PackageId>
+    <Authors>ViVaKR</Authors>
+    <Company>BM</Company>
+    <Description>여러 사이트가 함께 쓰는 SignalR 채팅 허브 (Drop-in SignalR chat hub for ASP.NET Core)</Description>
+    <PackageTags>signalr;chat;aspnetcore</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryUrl>https://github.com/ViVaKR/Viva.Chat</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Viva.Chat.Contracts\Viva.Chat.Contracts.csproj" />
   </ItemGroup>
