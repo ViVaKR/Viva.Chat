@@ -20,7 +20,7 @@
     <None Include="../../README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\Viva.Chat.Contracts\Viva.Chat.Contracts.csproj" />
+    <ProjectReference Include="../Viva.Chat.Contracts/Viva.Chat.Contracts.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -15,7 +15,8 @@ ASP.NET Core에 바로 꽂아 쓰는 **SignalR 채팅 허브**입니다. 여러 
 - **멀티 사이트 설계**: 방을 `{site}:{room}` 으로 구분해 `buddham:lobby` 와 `writer:lobby` 가 섞이지 않음
 - 사이트 ID, 허용 오리진, 허브 경로, 메시지 길이, 이력 개수를 옵션 패턴으로 설정
 - `IChatStore` 추상화: PostgreSQL, EF Core 등 원하는 저장소를 직접 연결
-- 안전한 기본값: 아무것도 저장하지 않는 기본 저장소, 입력 검증, 입장 후에만 전송 허용
+- 규칙과 신원을 갈아 끼우는 확장점: `IChatGuard`(입장 권한, 메시지 검사), `ISiteResolver`(연결의 사이트 판별), `IChatIdentityResolver`(JWT 클레임에서 사용자 식별). `UseGuard<T>()`, `UseSiteResolver<T>()`, `UseIdentityResolver<T>()` 로 교체
+- 안전한 기본값: 아무것도 저장하지 않는 기본 저장소, 입력 검증, 입장 후에만 전송 허용, 연결당 분당 전송 제한
 - SignalR 자격 증명과 함께 쓸 수 있는 CORS 정책(선택)
 - ASP.NET Core 공유 프레임워크만 사용하므로 SignalR 패키지를 따로 설치할 필요 없음
 - .NET 10 지원
@@ -40,9 +41,12 @@ dotnet add package ViVaKR.Chat.Contracts
 | `ViVaKR.Chat.Contracts` | Record | `ChatParticipant` | 입장·퇴장한 사람 (ID, 이름, 아바타) |
 | `ViVaKR.Chat.Contracts` | Interface | `IChatClient` | 서버가 클라이언트에서 호출하는 메서드 |
 | `ViVaKR.Chat.Contracts` | Interface | `IChatStore` | 저장소 추상화 |
+| `ViVaKR.Chat.Contracts` | Interface | `IChatGuard` | 방 입장 권한과 메시지 검사 |
 | `ViVaKR.Chat` | Class | `ChatHub` | SignalR 허브 |
+| `ViVaKR.Chat` | Interface | `ISiteResolver` | 연결이 속한 사이트를 정하는 확장점 |
 | `ViVaKR.Chat` | Class | `VivaChatOptions` | 설정 옵션 |
 | `ViVaKR.Chat` | Extensions | `AddVivaChat` / `MapVivaChat` | DI 등록과 엔드포인트 매핑 |
+| `ViVaKR.Chat` | Class | `VivaChatBuilder` | `AddVivaChat` 이 돌려주는 빌더 (`UseStore`, `UseGuard`, `UseSiteResolver`, `UseIdentityResolver`, `.SignalR`) |
 
 ### 허브 메서드 (클라이언트 → 서버)
 
@@ -74,6 +78,44 @@ dotnet add package ViVaKR.Chat.Contracts
 - 이름과 아바타는 연결 시점의 토큰 값이라서, 바꾸면 다시 연결한 뒤에 반영됩니다.
 - `ChatMessage.Avatar` 는 보낸 시점의 스냅샷이고, `IChatGuard` 에는 `ChatCaller.Principal`(클레임 전체)이 넘어갑니다.
 
+### 허브 연결 옵션 (0.3)
+
+전송 방식, 버퍼 크기, 상태 유지 재연결 같은 연결 옵션은 `MapVivaChat` 에 넘깁니다.
+
+```csharp
+app.MapVivaChat(o =>
+{
+    o.Transports = HttpTransportType.WebSockets | HttpTransportType.ServerSentEvents;
+    o.AllowStatefulReconnects = true;
+});
+```
+
+### CORS (0.3)
+
+호스트에 이미 CORS 정책이 있으면 `AllowedOrigins` 는 비워 두고 정책 이름을 줍니다. 허브에 걸리는 정책은 호스트의 전역 `UseCors` 보다 우선하므로 둘을 섞지 마세요.
+
+```json
+{ "VivaChat": { "CorsPolicy": "Origins" } }
+```
+
+### 허브 경로
+
+허브는 `/hubs/<이름>` 에 둡니다 (`/hubs/chat`). 호스트는 이 접두어 하나로 JWT 쿼리 토큰(`access_token`) 허용, nginx 의 WebSocket 설정, 감사 로그 제외를 처리할 수 있습니다.
+
+### 오류 처리 (0.3)
+
+저장소나 가드에서 예외가 나면 허브가 로그를 남기고(메시지 본문은 남기지 않음) 클라이언트에는 한국어 `HubException` 메시지를 보냅니다. 저장에 실패한 메시지는 방에 전달되지 않습니다.
+
+### 확장점
+
+| 하고 싶은 일 | 구현할 것 | 교체 |
+|---|---|---|
+| 메시지를 DB 에 저장 | `IChatStore` | `.UseStore<T>()` |
+| 비공개 방, 욕설·개인정보 필터 | `IChatGuard` | `.UseGuard<T>()` |
+| 서브도메인 등으로 사이트를 서버가 판별 | `ISiteResolver` | `.UseSiteResolver<T>()` |
+| 사용자 식별 방식 변경 | `IChatIdentityResolver` | `.UseIdentityResolver<T>()` |
+| 서버를 여러 대 띄울 때 메시지 공유 | Redis 백플레인 | `.SignalR.AddStackExchangeRedis(...)` |
+
 ### VivaChatOptions
 
 | 옵션 | 기본값 | 설명 |
@@ -81,9 +123,17 @@ dotnet add package ViVaKR.Chat.Contracts
 | `DefaultSiteId` | `"default"` | 연결에 `site` 쿼리 값이 없을 때 사용하며 항상 허용됩니다 |
 | `AllowedSites` | `[]` | 이 호스트가 추가로 받아들일 사이트 ID |
 | `AllowedOrigins` | `[]` | CORS 허용 오리진. 비워 두면 CORS 정책을 등록하지 않습니다 |
+| `CorsPolicy` | `null` | 호스트가 이미 가진 CORS 정책 이름 (0.3). 지정하면 허브에 이 정책을 쓰고 자체 정책은 만들지 않습니다 |
 | `HubPath` | `"/hubs/chat"` | 엔드포인트 경로 |
 | `MaxMessageLength` | `2000` | 허용하는 최대 메시지 길이 |
 | `HistoryOnJoin` | `50` | `Join` 이 돌려주는 메시지 수 |
+| `MaxMessagesPerMinute` | `30` | 연결 하나당 분당 최대 메시지 수 (0 이면 제한 없음) |
+| `RequireAuthentication` | `false` | `true` 면 허브에 `RequireAuthorization()` 을 적용합니다 |
+| `AnnouncePresence` | `true` | 입장·퇴장 알림 전송 여부 |
+| `UserIdClaim` | `"sub"` | 사용자 ID 를 읽는 클레임 (0.3) |
+| `DisplayNameClaim` | `"preferred_username"` | 표시 이름(필명)을 읽는 클레임 (0.3) |
+| `AvatarClaim` | `"picture"` | 아바타를 읽는 클레임 (0.3) |
+| `MaxDisplayNameLength` | `50` | 표시 이름 최대 길이 (0.3) |
 
 ## 빠른 시작
 
@@ -129,7 +179,7 @@ await connection.invoke('SendMessage', 'lobby', '안녕하세요!');
 
 ### 3. 저장소 연결 (선택)
 
-저장소가 없어도 허브는 동작하지만, 아무것도 저장되지 않고 `Join` 은 빈 이력을 돌려줍니다. `IChatStore` 를 구현하고 `AddVivaChat` 호출 **전에** 등록하세요.
+저장소가 없어도 허브는 동작하지만, 아무것도 저장되지 않고 `Join` 은 빈 이력을 돌려줍니다. `IChatStore` 를 구현하고 `UseStore<T>()` 로 등록하세요. (`AddVivaChat` 호출 전에 `AddScoped` 로 등록해도 동작합니다.)
 
 ```csharp
 public sealed class PgChatStore(AppDbContext db) : IChatStore
@@ -150,8 +200,8 @@ public sealed class PgChatStore(AppDbContext db) : IChatStore
             .ToListAsync(ct);
 }
 
-builder.Services.AddScoped<IChatStore, PgChatStore>();
-builder.Services.AddVivaChat(o => { /* ... */ });
+builder.Services.AddVivaChat(o => { /* ... */ })
+    .UseStore<PgChatStore>();
 ```
 
 ## 알아 둘 점

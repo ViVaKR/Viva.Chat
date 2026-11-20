@@ -17,9 +17,20 @@ public class VivaChatOptions
   /// <summary>기본 리졸버(QuerySiteResolver)가 추가로 받아들일 사이트 ID</summary>
   public string[] AllowedSites { get; set; } = [];
 
-  /// <summary>CORS 허용 오리진. 비워 두면 CORS 정책을 등록하지 않음</summary>
+  /// <summary>
+  /// CORS 허용 오리진. 비워 두면 CORS 정책을 등록하지 않음.
+  /// 호스트에 이미 CORS 정책이 있다면 이걸 채우지 말고 <see cref="CorsPolicy"/> 를 쓰세요.
+  /// </summary>
   public string[] AllowedOrigins { get; set; } = [];
 
+  /// <summary>
+  /// 호스트가 이미 등록한 CORS 정책 이름 (0.3). 지정하면 허브에 이 정책을 쓰고,
+  /// <see cref="AllowedOrigins"/> 로 만드는 자체 정책(VivaChat)은 만들지 않습니다.
+  /// 허브에 걸리는 정책(엔드포인트)은 호스트의 전역 UseCors 보다 우선하므로, 호스트의 도메인 규칙을 그대로 쓰려면 이 옵션을 쓰세요.
+  /// </summary>
+  public string? CorsPolicy { get; set; }
+
+  /// <summary>허브 경로. 규약은 /hubs/&lt;이름&gt; 입니다 (채팅 /hubs/chat, AI 채팅 /hubs/ai).</summary>
   [Required, RegularExpression("^/.*", ErrorMessage = "HubPath 는 '/' 로 시작해야 합니다.")]
   public string HubPath { get; set; } = "/hubs/chat";
 

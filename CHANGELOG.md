@@ -1,3 +1,46 @@
+## [0.3.0-preview.1] - 2026-11-20
+
+호환이 깨지는 변경이 있는 프리뷰입니다. 1.0.0 이전이라서 계약을 지금 바로잡습니다.
+
+### 추가
+- `IChatIdentityResolver` 와 기본 구현(JWT 클레임). `UseIdentityResolver<T>()` 로 교체합니다.
+- 옵션 `UserIdClaim`(`sub`), `DisplayNameClaim`(`preferred_username`), `AvatarClaim`(`picture`), `MaxDisplayNameLength`(50)
+- `ChatParticipant(UserId, Name, Avatar)`
+- `ChatMessage.Avatar` (보낸 시점의 스냅샷, 선택)
+- `ChatCaller.Avatar`, `ChatCaller.Principal` (가드가 나이·역할 같은 클레임을 직접 볼 수 있음)
+
+### 추가 (3단계)
+- 테스트 프로젝트 `tests/Viva.Chat.Tests` (xunit, `TestServer`): 식별, 입장/전송/수신, 입장·퇴장 알림, 사이트 분리와 거절, 가드, 전송 한도, 저장소 오류, `MapVivaChat` 연결 옵션을 검증합니다.
+- 배포 워크플로: 태그가 달리면 `dotnet test` 를 먼저 돌리고, 통과해야 pack/push 합니다. push 에 `--skip-duplicate` 를 추가했고, 태그 트리거를 `v[0-9]*` 로 좁혔습니다.
+
+### 추가 (2단계)
+- 옵션 `CorsPolicy`: 호스트의 CORS 정책 이름을 그대로 허브에 씁니다. 지정하면 `AllowedOrigins` 로 만드는 자체 정책(`VivaChat`)은 만들지 않습니다.
+- `MapVivaChat(Action<HttpConnectionDispatcherOptions>? configure)` 오버로드 (전송 방식, 버퍼 크기, `AllowStatefulReconnects` 등). 기존 `MapVivaChat()` 은 그대로 동작합니다.
+- 허브에 `ILogger` 를 주입해서 연결 거절, 저장소/가드 오류를 기록합니다 (메시지 본문은 기록하지 않음).
+
+### 바뀜 (2단계)
+- 저장소와 가드의 예외를 한국어 `HubException` 으로 바꿔서 보냅니다. 전에는 "예기치 않은 오류" 로만 보였습니다.
+- **저장에 실패한 메시지는 방에 전달하지 않습니다.** 전에는 저장 예외가 그대로 올라가서 같은 결과였지만, 이제 사용자에게 이유가 전달되고 로그가 남습니다.
+- `Join` 은 이력을 읽은 뒤에 입장 알림을 보냅니다. 이력을 읽지 못하면 입장을 되돌리고 알림은 나가지 않습니다.
+- 허브 경로 규약을 `/hubs/<이름>` 으로 문서화했습니다 (기본값 `/hubs/chat` 은 그대로).
+
+### 바뀜 (1단계)
+- 표시 이름을 `Identity.Name` 이 아니라 필명 클레임에서 읽습니다. `sub` 를 `NameClaimType` 으로 쓰는 호스트에서 이름이 GUID 로 나오던 문제가 사라집니다.
+- 사용자 ID 를 `Context.UserIdentifier` 대신 `sub` → `NameIdentifier` 순서로 읽습니다.
+- 표시 이름은 제어문자를 제거하고 50자로 자릅니다. 필명이 없으면 `user-xxxx`, 손님은 `guest-xxxx` 입니다.
+
+### 호환이 깨지는 변경
+
+| 변경 | 영향 | 고치는 법 |
+|------|------|-----------|
+| `IChatClient.UserJoined(string room, string user)` → `UserJoined(string room, ChatParticipant user)` | 클라이언트가 받는 두 번째 인자가 문자열에서 객체 `{ userId, name, avatar }` 로 바뀜 | 클라이언트 핸들러에서 `user.name` 을 쓰도록 수정 |
+| `IChatClient.UserLeft` 도 같음 | 위와 같음 | 위와 같음 |
+| `ChatMessage` 끝에 `Avatar` 추가 | 이름 있는 인자로 만들거나 `with` 를 쓰면 영향 없음. 위치 인자 8개로 `new` 하거나 분해(deconstruct) 하던 코드는 수정 필요 | `Avatar` 를 채우거나 생략 |
+| `ChatCaller` 에 `Avatar`, `Principal` 추가 | 3개 인자로 만들던 코드는 그대로 동작. 분해하던 코드는 수정 필요 | 필요한 값만 꺼내서 사용 |
+| `ChatHub` 생성자에 `IChatIdentityResolver` 추가 | 허브를 직접 상속하거나 생성하던 코드만 영향 | `AddVivaChat` 만 쓰면 변경 없음 |
+
+---
+
 # 0.2.0-preview.1
 
 > 공개 API 는 1.0 이전에 바뀔 수 있습니다. 아래는 0.1.0-preview.1 대비 변경입니다.

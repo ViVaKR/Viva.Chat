@@ -1,6 +1,9 @@
 <Solution>
   <Folder Name="/src/">
-    <Project Path="src/Viva.Chat.Contracts/Viva.Chat.Contracts.csproj" />
     <Project Path="src/Viva.Chat/Viva.Chat.csproj" />
+    <Project Path="src/Viva.Chat.Contracts/Viva.Chat.Contracts.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Viva.Chat.Tests/Viva.Chat.Tests.csproj" />
   </Folder>
 </Solution>

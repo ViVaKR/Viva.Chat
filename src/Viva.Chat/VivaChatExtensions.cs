@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Cors.Infrastructure;
+using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -10,6 +11,7 @@ namespace Viva.Chat;
 
 public static class VivaChatExtensions
 {
+    /// <summary>AllowedOrigins 로 만드는 자체 CORS 정책의 이름</summary>
     public const string CorsPolicyName = "VivaChat";
 
     public static VivaChatBuilder AddVivaChat(this IServiceCollection services, Action<VivaChatOptions>? configure = null)
@@ -30,16 +32,18 @@ public static class VivaChatExtensions
         services.TryAddSingleton<ISiteResolver, QuerySiteResolver>();
         services.TryAddSingleton<IChatIdentityResolver, ClaimsChatIdentityResolver>();
 
-        // CORS 정책은 최종 옵션 값(코드 + appsettings)을 읽어서 만든다.
+        // 자체 CORS 정책은 최종 옵션 값(코드 + appsettings)을 읽어서 만든다.
+        // 호스트 정책을 쓰기로 했거나(CorsPolicy) 오리진이 없으면 만들지 않는다.
         services.AddCors();
         services.AddOptions<CorsOptions>()
             .Configure<IOptions<VivaChatOptions>>((cors, chat) =>
             {
-                var origins = chat.Value.AllowedOrigins;
-                if (origins.Length == 0) return;
+                var opt = chat.Value;
+                if (!string.IsNullOrWhiteSpace(opt.CorsPolicy)) return;
+                if (opt.AllowedOrigins.Length == 0) return;
 
                 cors.AddPolicy(CorsPolicyName, p => p
-                    .WithOrigins(origins)
+                    .WithOrigins(opt.AllowedOrigins)
                     .AllowAnyHeader()
                     .AllowAnyMethod()
                     .AllowCredentials());
@@ -49,13 +53,35 @@ public static class VivaChatExtensions
     }
 
     public static HubEndpointConventionBuilder MapVivaChat(this IEndpointRouteBuilder endpoints)
+        => endpoints.MapVivaChat(null);
+
+    /// <summary>
+    /// 허브를 매핑한다. <paramref name="configure"/> 로 전송 방식, 버퍼 크기, 상태 유지 재연결 같은 허브 연결 옵션을 줄 수 있다.
+    /// <code>
+    /// app.MapVivaChat(o =>
+    /// {
+    ///     o.Transports = HttpTransportType.WebSockets | HttpTransportType.ServerSentEvents;
+    ///     o.AllowStatefulReconnects = true;
+    /// });
+    /// </code>
+    /// </summary>
+    public static HubEndpointConventionBuilder MapVivaChat(
+        this IEndpointRouteBuilder endpoints,
+        Action<HttpConnectionDispatcherOptions>? configure)
     {
         var options = endpoints.ServiceProvider.GetRequiredService<IOptions<VivaChatOptions>>().Value;
 
-        var hub = endpoints.MapHub<ChatHub>(options.HubPath);
+        var hub = configure is null
+            ? endpoints.MapHub<ChatHub>(options.HubPath)
+            : endpoints.MapHub<ChatHub>(options.HubPath, configure);
 
-        if (options.AllowedOrigins.Length > 0)
-            hub.RequireCors(CorsPolicyName);
+        // 호스트 정책 이름이 있으면 그걸 쓰고, 없으면 오리진 목록으로 만든 자체 정책을 쓴다.
+        var policy = !string.IsNullOrWhiteSpace(options.CorsPolicy)
+            ? options.CorsPolicy
+            : options.AllowedOrigins.Length > 0 ? CorsPolicyName : null;
+
+        if (policy is not null)
+            hub.RequireCors(policy);
 
         if (options.RequireAuthentication)
             hub.RequireAuthorization();

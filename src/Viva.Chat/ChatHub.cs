@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Viva.Chat.Contracts;
 
@@ -10,7 +11,8 @@ public sealed class ChatHub(
     ISiteResolver siteResolver,
     IChatIdentityResolver identityResolver,
     IOptions<VivaChatOptions> options,
-    TimeProvider time) : Hub<IChatClient>
+    TimeProvider time,
+    ILogger<ChatHub> logger) : Hub<IChatClient>
 {
     private const string StateKey = "viva.chat.state";
     private readonly VivaChatOptions _opt = options.Value;
@@ -37,6 +39,8 @@ public sealed class ChatHub(
         var site = siteResolver.Resolve(Context);
         if (site is null)
         {
+            // 거절 이유가 로그에 남아야 운영에서 원인을 찾을 수 있다 (사용자 입력 값은 남기지 않는다).
+            logger.LogWarning("허용되지 않는 사이트라서 연결을 거절했습니다. connection={ConnectionId}", Context.ConnectionId);
             Context.Abort();
             return;
         }
@@ -73,17 +77,48 @@ public sealed class ChatHub(
         var state = State;
         var ct = Context.ConnectionAborted;
 
-        if (!await guard.CanJoinAsync(state.Identity.ToCaller(), state.Site, room, ct))
+        bool allowed;
+        try
+        {
+            allowed = await guard.CanJoinAsync(state.Identity.ToCaller(), state.Site, room, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not HubException)
+        {
+            logger.LogError(ex, "입장 검사 중 오류가 났습니다. site={Site} room={Room}", state.Site, room);
+            throw new HubException("입장을 확인하지 못했습니다. 잠시 후 다시 시도하세요.");
+        }
+
+        if (!allowed)
             throw new HubException("입장할 수 없는 방입니다.");
 
         var group = GroupName(state.Site, room);
         await Groups.AddToGroupAsync(Context.ConnectionId, group, ct);
-
         var firstJoin = state.Joined.Add(room);
+
+        // 이력을 먼저 읽어서, 실패하면 입장 알림이 나가기 전에 되돌린다.
+        // (그룹에 먼저 들어가므로 이력을 읽는 사이에 온 메시지를 놓치지 않는다. 겹치는 메시지는 클라이언트가 Id 로 걸러낸다.)
+        IReadOnlyList<ChatMessage> history;
+        try
+        {
+            history = await store.GetRecentAsync(state.Site, room, _opt.HistoryOnJoin, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not HubException)
+        {
+            logger.LogError(ex, "대화 이력을 읽지 못했습니다. site={Site} room={Room}", state.Site, room);
+
+            if (firstJoin)
+            {
+                state.Joined.Remove(room);
+                await Groups.RemoveFromGroupAsync(Context.ConnectionId, group, CancellationToken.None);
+            }
+
+            throw new HubException("대화 이력을 불러오지 못했습니다. 잠시 후 다시 시도하세요.");
+        }
+
         if (firstJoin && _opt.AnnouncePresence)
             await Clients.Group(group).UserJoined(room, state.Identity.ToParticipant());
 
-        return await store.GetRecentAsync(state.Site, room, _opt.HistoryOnJoin, ct);
+        return history;
     }
 
     public async Task Leave(string room)
@@ -114,7 +149,18 @@ public sealed class ChatHub(
 
         EnsureWithinRate(state);
 
-        var verdict = await guard.InspectAsync(state.Identity.ToCaller(), state.Site, room, text, Context.ConnectionAborted);
+        ChatVerdict verdict;
+        try
+        {
+            verdict = await guard.InspectAsync(state.Identity.ToCaller(), state.Site, room, text, Context.ConnectionAborted);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not HubException)
+        {
+            // 메시지 본문은 개인적인 내용이라 로그에 남기지 않는다.
+            logger.LogError(ex, "메시지 검사 중 오류가 났습니다. site={Site} room={Room}", state.Site, room);
+            throw new HubException("메시지를 검사하지 못했습니다. 잠시 후 다시 시도하세요.");
+        }
+
         if (!verdict.Allowed)
             throw new HubException(verdict.Reason ?? "허용되지 않는 메시지입니다.");
 
@@ -131,7 +177,17 @@ public sealed class ChatHub(
         );
 
         // 보낸 사람이 끊겨도 이미 접수한 메시지는 저장·전달한다.
-        await store.SaveAsync(message, CancellationToken.None);
+        // 저장에 실패한 메시지는 방에 전달하지 않는다 (보였는데 이력에는 없는 메시지를 막기 위해).
+        try
+        {
+            await store.SaveAsync(message, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "메시지를 저장하지 못했습니다. site={Site} room={Room}", state.Site, room);
+            throw new HubException("메시지를 저장하지 못했습니다. 잠시 후 다시 시도하세요.");
+        }
+
         await Clients.Group(GroupName(state.Site, room)).ReceiveMessage(message);
     }
 

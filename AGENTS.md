@@ -11,7 +11,7 @@
 - **저장소**: https://github.com/ViVaKR/Viva.Chat (MIT)
 - **플랫폼**: .NET 10 (`net10.0`), C# 12+, `Microsoft.AspNetCore.App` 공유 프레임워크만 사용
 - **패키지 ID와 네임스페이스**: 패키지는 `ViVaKR.Chat` / `ViVaKR.Chat.Contracts`, 네임스페이스는 `Viva.Chat` / `Viva.Chat.Contracts`
-- **현재 버전**: `0.2.0-preview.1` 적용 중 (공개 API는 1.0 이전에 바뀔 수 있음)
+- **현재 버전**: `0.3.0-preview.1` 준비 중 (공개 API는 1.0 이전에 바뀔 수 있음, 변경 내용은 `CHANGELOG.md`)
 - **AI 채팅은 이 패키지의 범위가 아님**: 별도 패키지 `ViVaKR.AiChat`으로 만들 예정 (7절 참조)
 
 ## 2. 생태계 맥락 (왜 이렇게 생겼는가)
@@ -38,10 +38,15 @@ Viva.Chat/
 │       ├── VivaChatOptions.cs # 옵션 (섹션명 "VivaChat", 시작 시 검증)
 │       ├── VivaChatBuilder.cs # AddVivaChat 이 돌려주는 빌더
 │       └── VivaChatExtensions.cs  # AddVivaChat / MapVivaChat
+├── tests/Viva.Chat.Tests/     # xunit + TestServer (식별, 입장/전송/수신, 사이트 분리, 가드, 전송 한도, 저장소 오류 ...)
 ├── README.md, README.kr.md    # 영문/국문 (항상 같이 고친다)
+├── ref.md                     # 배포 절차 노트
+├── .github/workflows/deploy.yaml  # 태그 push 시 테스트 -> pack -> NuGet push
 ├── CHANGELOG.md
 └── Viva.Chat.slnx
 ```
+
+> 0.3 에서 `IChatIdentityResolver`(JWT 클레임 기반 사용자 식별)와 `ChatParticipant`(ID, 이름, 아바타)가 추가되었다. 정확한 파일 위치는 소스와 `CHANGELOG.md` 를 본다.
 
 ## 4. 설계 원칙 (지킬 것)
 
@@ -65,27 +70,24 @@ Viva.Chat/
 
 ```bash
 dotnet build
-dotnet pack ./src/Viva.Chat.Contracts/Viva.Chat.Contracts.csproj -c Release -p:Version=0.2.0-preview.1
-dotnet pack ./src/Viva.Chat/Viva.Chat.csproj -c Release -p:Version=0.2.0-preview.1
+dotnet test Viva.Chat.slnx -c Release                       # CI 와 같은 명령
+dotnet pack Viva.Chat.slnx -c Release -o ./out -p:Version=0.3.0-preview.1
 ```
 
-릴리스 절차 (GitHub Actions가 태그를 보고 버전을 정해 배포):
+### 릴리스 (자세한 절차와 실패 대응은 `ref.md`)
 
-```bash
-git add . && git status          # bin/ obj/ out/ 이 안 보이는지 확인
-git commit -m "feat: ..." && git push   # 워크플로 수정분은 태그보다 먼저
-git tag -a v0.2.0-preview.1 -m "Viva.Chat 0.2.0-preview.1"
-git push origin v0.2.0-preview.1
-```
-
-- 워크플로는 `GITHUB_REF_NAME`에서 앞의 `v`를 떼어 `-p:Version=`에 넘긴다. 태그 트리거는 `v[0-9]*`로 좁혀 두는 것을 권장한다.
-- 배포 확인: `nugetcheck ViVaKR.Chat`, `nugetcheck ViVaKR.Chat.Contracts`, 빈 `dotnet new web` 프로젝트에 `--prerelease`로 설치해 빌드.
+- **코드 push 로는 배포되지 않는다.** `v` + 숫자로 시작하는 태그를 push 하면 `.github/workflows/deploy.yaml` 이 `dotnet test` -> `dotnet pack` -> NuGet push(OIDC 임시 키, Contracts 먼저, `--skip-duplicate`)를 실행한다.
+- 테스트가 실패하면 배포되지 않는다.
+- 버전은 태그에서 정해지므로 csproj 의 버전을 손으로 고치지 않는다 (`v0.3.0-preview.1` -> `0.3.0-preview.1`).
+- 같은 버전은 NuGet 에 다시 올릴 수 없다. 일부만 올라간 뒤에 코드를 고쳤다면 버전을 올린다.
+- 태그 오타 방지: PowerShell 에서 `$ver = '0.3.0-preview.1'` 변수로 `git tag -a "v$ver"`, `git push origin "v$ver"` 를 쓴다.
+- 배포 확인: `nugetcheck ViVaKR.Chat`, `nugetcheck ViVaKR.Chat.Contracts`, 빈 `dotnet new web` 프로젝트에 `--prerelease` 로 설치해 빌드.
 - 빠른 동작 확인: `Invoke-RestMethod -Method Post "http://localhost:<port>/hubs/chat/negotiate?negotiateVersion=1"`
-- 이 저장소에는 아직 테스트 프로젝트가 없다. 추가하면 이 절에 실행 방법을 적는다.
 
 ## 7. 로드맵
 
-- **0.2.0-preview.1 (적용 중)**: 퇴장 알림, `IChatGuard`, `ISiteResolver`, 빌더, 옵션 검증, 전송 속도 제한, `ChatMessage.UserId`
+- **0.2.0-preview.1**: 퇴장 알림, `IChatGuard`, `ISiteResolver`, 빌더, 옵션 검증, 전송 속도 제한, `ChatMessage.UserId`
+- **0.3.0-preview.1 (준비 중)**: JWT 클레임 기반 사용자 식별(`IChatIdentityResolver`), `ChatParticipant`와 아바타, `CorsPolicy`, `MapVivaChat` 연결 옵션, 오류 처리 개선, 테스트 프로젝트와 "테스트 통과 후 배포" 워크플로
 - **다음 후보**: 이력 페이징(커서), `ViVaKR.Chat.Redis`(Presence, 사용자 단위 제한), `ClientTimeoutInterval`/KeepAlive 옵션 노출
 - **`ViVaKR.AiChat` (별도 패키지)**: 세션 방식 AI 채팅. 같은 틀(빌더, 옵션 검증, `ISiteResolver`, `IChatGuard`)을 공유하고, 허브는 `Open` / `Send`(서버 스트리밍) / `Cancel`, 목록/이력은 REST. 응답은 gRPC 서버에서 받고 RAG는 각 사이트 API에서 처리한다. 세션당 진행 중인 턴은 1개(Redis 락). GPU 한 장을 6개 사이트가 공유하므로 전역 큐는 gRPC 서버 쪽 몫이다.
 - **vivakr(청소년 대상 사이트 생성 플랫폼)** 때문에 가드(욕설/개인정보 필터, 비공개 방)와 테넌트 기반 사이트 리졸버가 중요하다.
