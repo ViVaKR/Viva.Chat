@@ -1,62 +1,110 @@
-﻿using System.ComponentModel;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
 using Viva.Chat.Contracts;
 
 namespace Viva.Chat;
 
-public sealed class ChatHub(IChatStore store, IOptions<VivaChatOptions> options) : Hub<IChatClient>
+public sealed class ChatHub(
+    IChatStore store,
+    IChatGuard guard,
+    ISiteResolver siteResolver,
+    IChatIdentityResolver identityResolver,
+    IOptions<VivaChatOptions> options,
+    TimeProvider time) : Hub<IChatClient>
 {
-    private const string SiteKey = "viva.site";
-    private const string JoinedKey = "viva.joined";
+    private const string StateKey = "viva.chat.state";
     private readonly VivaChatOptions _opt = options.Value;
-    private string Site => (string)Context.Items[SiteKey]!;
 
-    // 도메인 간 방이 섞이지 않도록 "{site}:{room}" 형태로 그룹을 만듬
-    private string GroupName(string room) => $"{Site}:{room}";
-    private HashSet<string> Joined => (HashSet<string>)Context.Items[JoinedKey]!;
-
-    private string DisplayName =>
-      Context.User?.Identity?.Name ?? $"guest-{Context.ConnectionId[..4]}";
-
-    public override Task OnConnectedAsync()
+    /// <summary>연결 하나가 가지는 상태 (사이트, 누구인가, 입장한 방, 최근 전송 시각)</summary>
+    private sealed class ConnectionState(string site, ChatIdentity identity)
     {
-        var site = ResolveSite();
-        if (site is null)
-        {
-            Context.Abort(); // 허용되지 않은 사이트
-            return Task.CompletedTask;
-        }
-
-        Context.Items[SiteKey] = site;
-        Context.Items[JoinedKey] = new HashSet<string>();
-        return base.OnConnectedAsync();
+        public string Site { get; } = site;
+        public ChatIdentity Identity { get; } = identity;
+        public HashSet<string> Joined { get; } = new(StringComparer.Ordinal);
+        public Queue<long> Sent { get; } = new();
     }
 
-    /// <summary>방에 입장하고 최근 대화 이력을 돌려준다.</summary>
+    private ConnectionState State =>
+        Context.Items.TryGetValue(StateKey, out var s) && s is ConnectionState state
+            ? state
+            : throw new HubException("연결이 초기화되지 않았습니다.");
+
+    // 도메인 간 방이 섞이지 않도록 "{site}:{room}" 형태로 그룹을 만듬
+    private static string GroupName(string site, string room) => $"{site}:{room}";
+
+    public override async Task OnConnectedAsync()
+    {
+        var site = siteResolver.Resolve(Context);
+        if (site is null)
+        {
+            Context.Abort();
+            return;
+        }
+
+        // 이름과 아바타는 연결할 때 한 번만 해석한다 (JWT 스냅샷).
+        Context.Items[StateKey] = new ConnectionState(site, identityResolver.Resolve(Context));
+        await base.OnConnectedAsync();
+    }
+
+    public override async Task OnDisconnectedAsync(Exception? exception)
+    {
+        try
+        {
+            if (_opt.AnnouncePresence
+                && Context.Items.TryGetValue(StateKey, out var s)
+                && s is ConnectionState state)
+            {
+                var who = state.Identity.ToParticipant();
+                foreach (var room in state.Joined)
+                    await Clients.GroupExcept(GroupName(state.Site, room), [Context.ConnectionId]).UserLeft(room, who);
+            }
+        }
+        finally
+        {
+            await base.OnDisconnectedAsync(exception);
+        }
+    }
+
+    /// <summary>방에 입장하고 최근 대화 이력을 돌려준다. 같은 방에 다시 Join 해도 입장 알림은 한 번만 간다.</summary>
     public async Task<IReadOnlyList<ChatMessage>> Join(string room)
     {
         EnsureValidRoom(room);
-        await Groups.AddToGroupAsync(Context.ConnectionId, GroupName(room));
-        Joined.Add(room);
-        await Clients.Group(GroupName(room)).UserJoined(room, DisplayName);
-        return await store.GetRecentAsync(Site, room, _opt.HistoryOnJoin, Context.ConnectionAborted);
+
+        var state = State;
+        var ct = Context.ConnectionAborted;
+
+        if (!await guard.CanJoinAsync(state.Identity.ToCaller(), state.Site, room, ct))
+            throw new HubException("입장할 수 없는 방입니다.");
+
+        var group = GroupName(state.Site, room);
+        await Groups.AddToGroupAsync(Context.ConnectionId, group, ct);
+
+        var firstJoin = state.Joined.Add(room);
+        if (firstJoin && _opt.AnnouncePresence)
+            await Clients.Group(group).UserJoined(room, state.Identity.ToParticipant());
+
+        return await store.GetRecentAsync(state.Site, room, _opt.HistoryOnJoin, ct);
     }
 
     public async Task Leave(string room)
     {
         EnsureValidRoom(room);
 
-        await Groups.RemoveFromGroupAsync(Context.ConnectionId, GroupName(room));
-        Joined.Remove(room);
-        await Clients.Group(GroupName(room)).UserLeft(room, DisplayName);
+        var state = State;
+        var group = GroupName(state.Site, room);
+
+        await Groups.RemoveFromGroupAsync(Context.ConnectionId, group);
+
+        if (state.Joined.Remove(room) && _opt.AnnouncePresence)
+            await Clients.Group(group).UserLeft(room, state.Identity.ToParticipant());
     }
 
     public async Task SendMessage(string room, string text)
     {
         EnsureValidRoom(room);
 
-        if (!Joined.Contains(room))
+        var state = State;
+        if (!state.Joined.Contains(room))
             throw new HubException("먼저 방에 입장해야 합니다.");
 
         text = text?.Trim() ?? string.Empty;
@@ -64,31 +112,44 @@ public sealed class ChatHub(IChatStore store, IOptions<VivaChatOptions> options)
         if (text.Length == 0 || text.Length > _opt.MaxMessageLength)
             throw new HubException("메시지 길이가 올바르지 않습니다.");
 
+        EnsureWithinRate(state);
+
+        var verdict = await guard.InspectAsync(state.Identity.ToCaller(), state.Site, room, text, Context.ConnectionAborted);
+        if (!verdict.Allowed)
+            throw new HubException(verdict.Reason ?? "허용되지 않는 메시지입니다.");
+
+        var now = time.GetUtcNow();
         var message = new ChatMessage(
-            Guid.NewGuid().ToString("N"),
-            Site,
+            Guid.CreateVersion7(now).ToString("N"), // 시간순 정렬되는 ID (인덱스 지역성에 유리)
+            state.Site,
             room,
-            DisplayName,
-            text,
-            DateTimeOffset.UtcNow
+            state.Identity.DisplayName,
+            verdict.Text ?? text,
+            now,
+            state.Identity.UserId,
+            state.Identity.Avatar
         );
 
-        await store.SaveAsync(message, Context.ConnectionAborted);
-        await Clients.Group(GroupName(room)).ReceiveMessage(message);
+        // 보낸 사람이 끊겨도 이미 접수한 메시지는 저장·전달한다.
+        await store.SaveAsync(message, CancellationToken.None);
+        await Clients.Group(GroupName(state.Site, room)).ReceiveMessage(message);
     }
 
-    private string? ResolveSite()
+    /// <summary>연결 단위 전송 속도 제한 (사용자 단위는 Redis 등이 필요하므로 호스트의 몫)</summary>
+    private void EnsureWithinRate(ConnectionState state)
     {
+        if (_opt.MaxMessagesPerMinute <= 0) return;
 
-        var requested = Context.GetHttpContext()?.Request.Query["site"].ToString();
-        var site = string.IsNullOrWhiteSpace(requested)
-          ? _opt.DefaultSiteId
-          : requested.Trim().ToLowerInvariant();
+        var now = time.GetTimestamp();
+        var window = TimeSpan.FromMinutes(1);
 
-        var allowed = site.Equals(_opt.DefaultSiteId, StringComparison.OrdinalIgnoreCase)
-          || _opt.AllowedSites.Contains(site, StringComparer.OrdinalIgnoreCase);
+        while (state.Sent.Count > 0 && time.GetElapsedTime(state.Sent.Peek(), now) > window)
+            state.Sent.Dequeue();
 
-        return allowed ? site : null;
+        if (state.Sent.Count >= _opt.MaxMessagesPerMinute)
+            throw new HubException("메시지를 너무 빠르게 보내고 있습니다. 잠시 후 다시 시도하세요.");
+
+        state.Sent.Enqueue(now);
     }
 
     private static void EnsureValidRoom(string room)

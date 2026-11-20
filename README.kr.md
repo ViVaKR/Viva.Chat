@@ -37,6 +37,7 @@ dotnet add package ViVaKR.Chat.Contracts
 | 패키지 | 구분 | 이름 | 설명 |
 |--------|------|------|------|
 | `ViVaKR.Chat.Contracts` | Record | `ChatMessage` | 채팅 메시지 하나 |
+| `ViVaKR.Chat.Contracts` | Record | `ChatParticipant` | 입장·퇴장한 사람 (ID, 이름, 아바타) |
 | `ViVaKR.Chat.Contracts` | Interface | `IChatClient` | 서버가 클라이언트에서 호출하는 메서드 |
 | `ViVaKR.Chat.Contracts` | Interface | `IChatStore` | 저장소 추상화 |
 | `ViVaKR.Chat` | Class | `ChatHub` | SignalR 허브 |
@@ -56,8 +57,22 @@ dotnet add package ViVaKR.Chat.Contracts
 | 이벤트 | 인자 | 설명 |
 |--------|------|------|
 | `ReceiveMessage` | `ChatMessage` | 새 메시지 도착 |
-| `UserJoined` | `room`, `user` | 누군가 입장 |
-| `UserLeft` | `room`, `user` | 누군가 퇴장 |
+| `UserJoined` | `room`, `ChatParticipant` | 누군가 입장 (0.3 부터 이름 문자열 대신 `{ userId, name, avatar }`) |
+| `UserLeft` | `room`, `ChatParticipant` | 누군가 퇴장 |
+
+### 사용자 식별 (0.3)
+
+허브는 연결할 때 JWT 클레임에서 사용자를 한 번 읽어 둡니다. 기본값은 다음과 같고, 옵션이나 `UseIdentityResolver<T>()` 로 바꿀 수 있습니다.
+
+| 용도 | 클레임 (기본) | 옵션 |
+|------|---------------|------|
+| 사용자 ID | `sub` (없으면 `NameIdentifier`) | `UserIdClaim` |
+| 표시 이름 | `preferred_username` | `DisplayNameClaim` |
+| 아바타 | `picture` | `AvatarClaim` |
+
+- 표시 이름은 필명만 씁니다. `name`(실명)과 `email` 로 대신하지 않고, 필명이 없으면 `user-xxxx` 로 보입니다. 로그인하지 않았으면 `guest-xxxx` 입니다.
+- 이름과 아바타는 연결 시점의 토큰 값이라서, 바꾸면 다시 연결한 뒤에 반영됩니다.
+- `ChatMessage.Avatar` 는 보낸 시점의 스냅샷이고, `IChatGuard` 에는 `ChatCaller.Principal`(클레임 전체)이 넘어갑니다.
 
 ### VivaChatOptions
 
@@ -163,3 +178,4 @@ builder.Services.AddVivaChat(o => { /* ... */ });
 ## 만든 사람
 
 **ViVaKR** · [GitHub](https://github.com/ViVaKR/Viva.Chat)
+설계·검토 동료: **제독** (Claude, Anthropic) 🪷

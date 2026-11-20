@@ -163,3 +163,4 @@ builder.Services.AddVivaChat(o => { /* ... */ });
 ## Author
 
 **ViVaKR** · [GitHub](https://github.com/ViVaKR/Viva.Chat)
+Design & review partner: Claude (Anthropic)
