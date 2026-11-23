@@ -211,15 +211,22 @@ builder.Services.AddVivaChat(o => { /* ... */ })
 - **JWT over WebSockets** travels as the `access_token` query string. Read it in `JwtBearerEvents.OnMessageReceived` for paths under `/hubs`.
 - **More than one replica?** Add a Redis backplane (`Microsoft.AspNetCore.SignalR.StackExchangeRedis`) on the host, or messages will not cross instances.
 - Users who are not signed in appear as `guest-xxxx`.
-
+- **Room names starting with `ai-` are reserved** (since 0.4). `ChatHub` rejects them because they belong to `ViVaKR.AiChat`. Rename any existing room that starts with `ai-`.
+- **Sessions are per user.** The room name contains a hash of the user ID and a server-issued random session ID, so one user can never open or cancel another user's session. A connection can open up to 20 sessions.
+- **Signed-in users only.** Connections without a user ID are rejected.
+- **The default turn gate is in memory.** "One running turn per session" and `Cancel` hold only while you run a single replica. With several replicas, plug in a shared-store implementation with `UseAiTurnGate<T>()`. No Redis implementation ships yet.
+- **Closing does not cancel.** `Close` and a dropped connection do not stop a running answer. It is generated to the end and saved (up to `RequestTimeoutSeconds`). Call `Cancel` to stop it. With `SavePartialOnCancel`, the text received so far is kept. Failed turns are never saved.
+- **Limits are per connection.** `MaxTurnsPerMinute` counts per connection. A per-user limit belongs in your `IChatGuard` or `IAiTurnGate`.
+- **History lives in your `IChatStore`.** AI messages are stored under rooms that start with `ai-`. That prefix is reserved: `ChatHub` in ViVaKR.Chat rejects such room names, so rename any existing human-chat room that starts with `ai-`.
+- **Guard calls.** `IChatGuard.InspectAsync` runs for every question (the room name starts with `ai-`). `CanJoinAsync` is not called for AI sessions.
+- **Pre-release dependency.** This package depends on `AiChatServer.Contracts` 0.1.0-preview.2, so it stays a pre-release until that package is stable.
 ## Requirements
 
 - .NET 10
 - ASP.NET Core (the `Microsoft.AspNetCore.App` shared framework)
 
 ## Related
-
-- [ViVaKR.AuthLibrary](https://www.nuget.org/packages/ViVaKR.AuthLibrary): Identity entities for JWT-based authentication
+- [ViVaKR.AiChat](https://www.nuget.org/packages/ViVaKR.AiChat): AI chat hub on top of ViVaKR.Chat (streams replies from an AiChatServer over SignalR)
 
 ## License
 

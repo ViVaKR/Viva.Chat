@@ -114,7 +114,8 @@ public class ChatHubTests
         await a.JoinAsync("lobby");
         await b.JoinAsync("lobby");
 
-        await b.Connection.StopAsync();
+        var ct = TestContext.Current.CancellationToken;
+        await b.Connection.StopAsync(ct);
 
         var (_, user) = await a.Left.NextAsync();
         Assert.Equal("Seeker", user.Name);
@@ -191,7 +192,8 @@ public class ChatHubTests
             return; // 시작 단계에서 바로 거절됨
         }
 
-        await closed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var ct = TestContext.Current.CancellationToken;
+        await closed.Task.WaitAsync(TimeSpan.FromSeconds(5), ct);
     }
 
     [Fact(DisplayName = "다른 사이트의 같은 이름 방과 섞이지 않는다")]
@@ -231,6 +233,38 @@ public class ChatHubTests
 
         Assert.Contains("방 이름이 올바르지 않습니다.", ex.Message);
     }
+
+    [Theory(DisplayName = "예약된 방 이름(ai-)은 입장, 전송, 퇴장 모두 거절된다")]
+    [InlineData("ai-news")]
+    [InlineData("AI-news")]
+    [InlineData("ai-0123456789abcdef-0123456789abcdef0123456789abcdef")]
+    public async Task Reserved_room_prefix_is_rejected(string room)
+    {
+        await using var host = await ChatTestHost.StartAsync();
+        var a = await host.ConnectAsync(Seeker);
+
+        var join = await Assert.ThrowsAsync<HubException>(() => a.JoinAsync(room));
+        var send = await Assert.ThrowsAsync<HubException>(() => a.SendAsync(room, "hi"));
+        var leave = await Assert.ThrowsAsync<HubException>(() => a.LeaveAsync(room));
+
+        Assert.Contains("예약된 방 이름입니다.", join.Message);
+        Assert.Contains("예약된 방 이름입니다.", send.Message);
+        Assert.Contains("예약된 방 이름입니다.", leave.Message);
+    }
+
+    [Theory(DisplayName = "ai 로 시작해도 접두어 'ai-' 가 아니면 입장된다")]
+    [InlineData("airport")]
+    [InlineData("ai_news")]
+    [InlineData("ai")]
+    public async Task Rooms_that_only_resemble_the_prefix_are_allowed(string room)
+    {
+        await using var host = await ChatTestHost.StartAsync();
+        var a = await host.ConnectAsync(Seeker);
+
+        await a.JoinAsync(room);
+    }
+
+
 
     [Fact(DisplayName = "비어 있거나 너무 긴 메시지는 거절된다")]
     public async Task Message_length_is_validated()

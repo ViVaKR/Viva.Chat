@@ -211,6 +211,7 @@ builder.Services.AddVivaChat(o => { /* ... */ })
 - **WebSocket 환경의 JWT** 는 `access_token` 쿼리 문자열로 전달됩니다. `/hubs` 경로에 한해 `JwtBearerEvents.OnMessageReceived` 에서 꺼내 쓰세요.
 - **레플리카가 둘 이상이면** 호스트에 Redis 백플레인(`Microsoft.AspNetCore.SignalR.StackExchangeRedis`)을 추가해야 인스턴스 간에 메시지가 전달됩니다.
 - 인증되지 않은 사용자는 연결이 인증되기 전까지 `guest-xxxx` 로 표시됩니다.
+- **`ai-` 로 시작하는 방 이름은 예약되어 있습니다** (0.4 부터). `ViVaKR.AiChat` 이 쓰는 이름이라서 `ChatHub` 는 입장을 거절합니다. 이미 `ai-` 로 시작하는 방을 쓰고 있다면 이름을 바꾸세요.
 
 ## 요구 사항
 
@@ -219,7 +220,7 @@ builder.Services.AddVivaChat(o => { /* ... */ })
 
 ## 관련 패키지
 
-- [ViVaKR.AuthLibrary](https://www.nuget.org/packages/ViVaKR.AuthLibrary): JWT 인증용 Identity 엔티티 모음
+- [ViVaKR.AiChat](https://www.nuget.org/packages/ViVaKR.AiChat): ViVaKR.Chat 위에 얹는 AI 채팅 허브 (AiChatServer 의 답변을 SignalR 로 스트리밍)
 
 ## 라이선스
 

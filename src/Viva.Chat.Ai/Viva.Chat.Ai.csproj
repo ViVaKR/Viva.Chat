@@ -1,0 +1,44 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <PackageId>ViVaKR.AiChat</PackageId>
+    <Authors>ViVaKR</Authors>
+    <Company>BM</Company>
+    <Description>ViVaKR.Chat 위에 얹는 AI 채팅 허브. AiChatServer(gRPC)의 답변을 SignalR 로 스트리밍합니다. (AI chat hub
+      for ViVaKR.Chat, streaming AiChatServer gRPC replies over SignalR)</Description>
+    <PackageTags>signalr;chat;ai;grpc;aspnetcore</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryUrl>https://github.com/ViVaKR/Viva.Chat</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <!--
+    pack 하면 아래 세 개가 이 패키지의 "의존성" 으로 nuspec 에 적힌다.
+    그래서 `dotnet add package ViVaKR.AiChat` 한 줄이면 ViVaKR.Chat, ViVaKR.Chat.Contracts,
+    AiChatServer.Contracts, Grpc.Net.ClientFactory, Google.Protobuf, Grpc.Core.Api 가 NuGet 에 의해 함께
+  설치된다.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="../Viva.Chat/Viva.Chat.csproj" />
+    <PackageReference Include="AiChatServer.Contracts" Version="0.1.0-preview.2" />
+    <!-- Grpc.AspNetCore(서버) 와 같은 버전대로 맞춘다. 중앙 패키지 관리(Directory.Packages.props)를 쓰면 Version 을 거기로
+    옮긴다. -->
+    <PackageReference Include="Grpc.Net.ClientFactory" Version="2.85.0" />
+  </ItemGroup>
+
+</Project>

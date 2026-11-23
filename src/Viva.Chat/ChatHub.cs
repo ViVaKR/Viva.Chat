@@ -215,5 +215,9 @@ public sealed class ChatHub(
           && room.All(x => char.IsLetterOrDigit(x) || x is '-' or '_');
 
         if (!ok) throw new HubException("방 이름이 올바르지 않습니다.");
+
+        // 다른 패키지 (ViVaKR.AiChat 등) 가 쓰는 방은 사람 채팅에서 들어올 수 없다.
+        if (ChatRoomRules.IsReserved(room))
+            throw new HubException("예약된 방 이름입니다. 다른 이름을 사용하세요.");
     }
 }

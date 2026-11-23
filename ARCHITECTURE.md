@@ -63,7 +63,7 @@ flowchart TB
         direction TB
         subgraph H1["ChatHub  /hubs/chat  (사람 ↔ 사람)"]
             direction TB
-            L1["ViVaKR.Chat 패키지<br/>NuGet 0.3.0-preview.1"]
+            L1["ViVaKR.Chat 패키지"]
             G1["IChatGuard<br/>(방 권한, 내용 검사)"]
             S1["IChatStore<br/>(메시지 저장)"]
             I1["IChatIdentityResolver<br/>(JWT → 필명, 아바타)"]
@@ -71,20 +71,23 @@ flowchart TB
         end
         subgraph H2["AiChatHub  /hubs/ai  (사람 ↔ 법등)"]
             direction TB
-            L2["우리가 만든 AiChatHub<br/>(나중에 ViVaKR.AiChat 패키지)"]
-            C2["IAiChatClient<br/>(AiChat.Client, gRPC)"]
-            S2["IConversationStore<br/>(Redis, 나중에 DB)"]
-            K2["IAiUserLock<br/>(사용자당 동시 1개)"]
-            L2 --- C2 & S2 & K2
+            L2["ViVaKR.AiChat 패키지<br/>Open / Send / Cancel / Close"]
+            R2["AiChatSessionRunner<br/>(턴을 백그라운드로 실행, 그룹에 스트리밍)"]
+            C2["IAiChatGateway<br/>(기본: gRPC)"]
+            K2["IAiTurnGate<br/>(세션당 턴 1개, 취소 · 기본은 메모리)"]
+            L2 --- R2 & K2
+            R2 --- C2
         end
+        SHARED["두 허브가 같이 쓰는 확장점<br/>IChatStore · IChatGuard · ISiteResolver · IChatIdentityResolver"]
         JWT["JWT 인증 (OnMessageReceived 에서<br/>/hubs 경로는 access_token 쿼리 허용)"]
         JWT --> H1 & H2
+        L1 & L2 -.-> SHARED
     end
 
     C2 ==>|gRPC| AIS["aichat-server (공용)"]
     S1 -.-> DB[("사이트 DB")]
-    S2 -.-> RD[("사이트 Redis")]
-    K2 -.-> RD
+    L2 -.->|"AI 대화 이력도 같은 저장소 (ai- 방)"| DB
+
 ```
 
 **읽는 법**: 위 칸(ChatHub)은 사람끼리 대화방이고 패키지로 공유해. 아래 칸(AiChatHub)은 법등과의 1:1 대화고, AI 서버를 부르는 것만 다르고 틀은 같아. 두 허브는 섞지 않아.
@@ -99,38 +102,58 @@ sequenceDiagram
     actor 도반 as 도반 (브라우저)
     participant NG as nginx
     participant HUB as AiChatHub (사이트 API)
-    participant RD as Redis (사이트)
+    participant GATE as IAiTurnGate (메모리)
+    participant ST as IChatStore (사이트 DB)
+    participant RUN as AiChatSessionRunner
     participant AI as aichat-server (공용)
     participant OL as Ollama (M1 GPU)
 
     도반->>NG: WebSocket 연결 (?access_token=JWT)
     NG->>HUB: 업그레이드 (101)
-    도반->>HUB: Ask(conversationId, question)
-    Note over HUB: 사용자 ID 는 JWT 에서만 꺼냄<br/>(클라이언트가 보내지 않음)
-    HUB->>RD: 사용자 락 획득 (SET NX)
-    alt 이미 생성 중
-        HUB-->>도반: error: busy
-    else 락 획득
-        HUB->>RD: 이전 대화 읽기
-        HUB->>AI: StreamChat(페르소나, 이력 + 새 질문)
+    Note over HUB: 로그인하지 않은 연결은 거절<br/>(손님은 AI 를 쓸 수 없음)
+
+    도반->>HUB: Open(sessionId?)
+    HUB->>ST: 이력 읽기 (방 = ai-사용자해시-세션ID)
+    HUB-->>도반: { sessionId, history }
+
+    도반->>HUB: Send(sessionId, 질문)
+    Note over HUB: 사용자 ID 는 JWT 에서만 꺼냄<br/>(클라이언트가 보내지 않음)<br/>길이, 속도, IChatGuard 검사
+    HUB->>GATE: TryBeginAsync(세션)
+    alt 이미 답변 진행 중
+        HUB-->>도반: 오류 (끝난 뒤에 다시 보내세요)
+    else 자리 확보
+        HUB->>ST: 질문 저장
+        HUB-->>도반: ReceiveMessage (에코, 같은 사용자의 모든 탭)
+        HUB->>RUN: Start(턴) 기다리지 않음
+        HUB-->>도반: { userMessageId, streamId } 바로 반환
+        RUN->>ST: 이전 대화 읽기 (맥락)
+        RUN->>AI: StreamChat(페르소나, 이력 + 새 질문)
         AI->>OL: /api/chat (stream)
         loop 토큰이 생성되는 동안
             OL-->>AI: 조각
-            AI-->>HUB: ChatChunk (content/thinking)
-            HUB-->>도반: token / thinking 이벤트
+            AI-->>RUN: ChatChunk (content / thinking)
+            RUN-->>도반: ReceiveChunk (streamId, kind, delta)
         end
-        AI-->>HUB: done + usage
-        HUB->>RD: 질문/답변 한 쌍 저장 (정상 완료 때만)
-        HUB-->>도반: done (토큰 수)
-        HUB->>RD: 락 해제
+        alt 정상 완료
+            RUN->>ST: 답변 저장 (Id = streamId)
+            RUN-->>도반: StreamCompleted
+        else 실패
+            RUN-->>도반: StreamFailed (저장하지 않음)
+        end
+        RUN->>GATE: 턴 반납
     end
     opt 사용자가 중지 버튼
-        도반-->>HUB: 구독 해제 (취소)
-        HUB-->>AI: 취소 전파
+        도반->>HUB: Cancel(sessionId)
+        HUB->>GATE: Cancel(세션)
+        GATE-->>RUN: 취소 신호
+        RUN-->>AI: 취소 전파
         AI-->>OL: 생성 중단 (GPU 해방)
-        Note over HUB,RD: 취소되면 아무것도 저장하지 않음
+        RUN->>ST: 지금까지 받은 답 저장 (SavePartialOnCancel)
+        RUN-->>도반: StreamCancelled (partial)
     end
 ```
+
+**읽는 법**: `Send` 는 바로 돌아오고 답변은 이벤트로 흘러와. 중지는 `Cancel` 로만 해. 탭을 닫거나 `Close` 를 불러도 답변은 끝까지 만들어져서 저장돼(GPU 는 최대 300초까지 써). 취소하면 지금까지 받은 답이 저장되고(기본값), 실패한 턴은 저장하지 않아.## 3. AI 질문 한 번이 지나가는 길
 
 ---
 
@@ -328,34 +351,36 @@ sequenceDiagram
 
 ## 7. 이번 수정의 지도
 
+## 7. 이번 수정의 지도
+
 ```mermaid
 flowchart TB
-    START(["Viva.Chat 0.2.0-preview.1<br/>(배포됨)"])
+    START(["Viva.Chat 0.3.0-preview.1<br/>(배포됨)"])
 
-    subgraph R03["0.3.0-preview.1 (묶어서 한 번에 배포)"]
+    subgraph R04["0.4.0-preview.1 (세 패키지를 한 태그로 배포)"]
         direction TB
-        S1["① 식별 + 계약 변경<br/>IChatIdentityResolver, ChatParticipant, Avatar<br/>✅ 코드 전달 완료 (빌드 확인 대기)"]
-        S2["② CORS 정책 재사용 옵션"]
-        S3["③ 저장소 오류 처리 + 로깅"]
-        S4["④ MapVivaChat 허브 옵션 오버로드<br/>+ 경로 /hubs/* 통일"]
-        S5["⑤ 테스트 프로젝트<br/>(입장→전송→수신, 사이트 거절,<br/>입장 전 전송, 가드 거부)"]
-        S6["⑥ CHANGELOG, README, deploy.yaml 정리<br/>(--skip-duplicate, 태그 v[0-9]*)"]
-        S1 --> S2 --> S3 --> S4 --> S5 --> S6
+        S1["① ViVaKR.AiChat 추가<br/>AiChatHub (Open / Send / Cancel / Close), 스트리밍 이벤트,<br/>사용자별 세션 격리, IAiChatGateway, IAiTurnGate"]
+        S2["② ChatRoomRules<br/>예약 방 접두어 ai- (ChatHub 가 거절)"]
+        S3["③ AiChatServer.Contracts 0.1.0-preview.2 로 의존 갱신"]
+        S4["④ 배포 워크플로: Contracts → Chat → AiChat,<br/>하나라도 없으면 아무것도 올리지 않음"]
+        S5["⑤ 테스트 37개 통과, CHANGELOG, README, AGENTS 정리"]
+        S1 --> S2 --> S3 --> S4 --> S5
     end
 
     USE["buddham 에서 실제로 사용<br/>(브라우저까지 완주)"]
-    V1(["1.0.0 승격"])
+    NEXT["다음 버전: AI 허브 테스트, 연결 끊김 시 취소 옵션,<br/>사용자 단위 제한, Redis 턴 게이트"]
+    V1(["1.0.0 승격<br/>(AiChatServer.Contracts 정식 필요)"])
 
     START --> S1
-    S6 --> TAG["태그 v0.3.0-preview.1 푸시"] --> USE --> V1
+    S5 --> TAG["태그 v0.4.0-preview.1 푸시"] --> USE --> NEXT --> V1
 
     subgraph SITE["buddham API 쪽 작업 (라이브러리와 별개)"]
         direction TB
         N1["JWT OnMessageReceived 에 /hubs 추가"]
         N2["AuditLog ExcludePaths 에 /hubs 추가"]
-        N3["nginx location ^~ /hubs/ 추가"]
-        N4["Program.cs: AddSignalR, AddAiChatClient,<br/>MapHub, 저장소/락 등록"]
-        N5["buddham-api.yaml: Services__Ai__Address"]
+        N3["nginx location ^~ /hubs/ 추가 (/hubs/ai 도 포함)"]
+        N4["Program.cs: AddVivaChat(...).UseStore(...).AddAiChat(...),<br/>MapVivaChat, MapVivaAiChat (로그인 필수)"]
+        N5["buddham-api.yaml: VivaAiChat__ServerUrl<br/>(appsettings 의 VivaAiChat 섹션)"]
     end
 
     USE -.-> SITE
@@ -364,6 +389,6 @@ flowchart TB
 
 **지금 해야 할 일 순서**
 
-1. ① 번 파일로 `dotnet build` 하기
-2. 안 되면 에러를 알려주기 → ②~⑥ 으로 이어가기
-3. buddham API 쪽 5가지는 라이브러리와 따로 진행할 수 있어
+1. 문서 정리를 마치고 `git add` 로 `src/Viva.Chat.Ai/`, `ChatRoomRules.cs` 가 들어갔는지 확인하기
+2. `publish.md` 순서대로 pack → nuspec 확인 → 커밋 → 태그 push
+3. buddham API 쪽 5가지는 라이브러리와 따로 진행할 수 있어 (단, `MapVivaAiChat` 은 인증이 설정되어 있어야 시작돼)
